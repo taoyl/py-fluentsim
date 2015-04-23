@@ -3,9 +3,13 @@
 
 """
 Module implementing models for updating files.
+
+Author: taoyl <nerotao@foxmail.com>
+Date  : Apr 21, 2015
 """
 
 import re
+import os
 
 # Constants
 SECONDS_IN_DAY   = 3600 * 24
@@ -249,7 +253,75 @@ class JouFileModel(object):
 
         # write file back
         # TODO
-        with open('%s-new' % fname, 'w') as wfh:
+        os.rename(fname, '%s.old' % fname)
+        with open(fname, 'w') as wfh:
              wfh.write(lines)
         return True
 
+
+class UdfFileModel(object):
+    """
+    Model for udf file.
+    """
+    def __init__(self, parent=None):
+        """
+        Constructor
+        """
+        super(UdfFileModel, self).__init__()
+
+        # file name
+        self.filename = ''
+        self.param_names = set([
+                'copc_f', 'copc_m', 'copc_n', 'copc_a', 'copc_b', 'copc_c',
+                'copc_d', 'copc_e', 'coph_f', 'coph_m', 'coph_n', 'coph_a',
+                'coph_b', 'coph_c', 'coph_d', 'coph_e'
+                ])
+
+    def read_params(self, fname=None):
+        """
+        Read udf file and extract the params.
+        """
+        if fname == None:
+            if self.filename == '':
+                return None
+            fname = self.filename
+        # read all lines
+        params = {}
+        with open(fname, 'r') as rfh:
+            lines = rfh.readlines()
+        lines = ''.join(lines)
+
+        for param in self.param_names:
+            res = re.search(r'%s\s*=\s*([-.\d]+)' % param, lines)
+            if res:
+                params[param] = res.group(1)
+        return params
+
+    def write_params(self, params, fname=None):
+        """
+        Update udf file using the input params.
+        """
+        if fname == None:
+            if self.filename == '':
+                return False
+            fname = self.filename
+        # read all lines and update param value
+        with open(fname, 'r') as rfh:
+            lines = rfh.readlines()
+        lines = ''.join(lines)
+        lines = re.sub(r'(\*fname\s*=\s*").*"', 
+                        r'\g<1>%s"' % params['load_file'], lines)
+        print r'\g<1>%s"' % params['load_file']
+        for param in self.param_names:
+            # any paramter is not found, stop update
+            if not params.has_key(param):
+                return False
+            lines = re.sub(r'(%s\s*=\s*)[-.\d]+' % param, 
+                    r'\g<1>%s' % params[param], lines)
+        # write lines back
+        # TODO
+        os.rename(fname, '%s.old' % fname)
+        with open(fname, 'w') as wrh:
+            wrh.write(lines)
+        return True
+    
