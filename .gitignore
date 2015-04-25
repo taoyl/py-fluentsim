@@ -45,3 +45,6 @@ Temporary Items
 # pothon compile file and bak file
 *.pyc
 *~
+images
+build
+release
