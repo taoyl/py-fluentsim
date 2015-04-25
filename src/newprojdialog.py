@@ -6,8 +6,12 @@ Module implementing FluentSim.
 """
 
 from PyQt4 import QtGui
-from PyQt4.QtCore import pyqtSlot
+from PyQt4.QtCore import QObject, pyqtSignal, pyqtSlot
 from PyQt4.QtGui import QDialog
+
+class Communicate(QObject):
+    proj_name_changed = pyqtSignal(str,str)
+
 
 class NewProjDialog(QDialog):
     """
@@ -40,6 +44,9 @@ class NewProjDialog(QDialog):
         self.btn_browse_file.clicked.connect(self.browse_file)
         self.btn_create.clicked.connect(self.create_proj_file)
         self.btn_cancel.clicked.connect(self.close)
+
+        self.com = Communicate()
+        self.com.proj_name_changed[str,str].connect(parent.change_proj_name)
 
         self.setWindowTitle(u"新建工程")
         self.setFixedSize(600, 100)
@@ -77,5 +84,7 @@ class NewProjDialog(QDialog):
         lines.append("[ProjectName]=%s" % proj_name)
         with open(proj_file, 'w') as fh:
              fh.writelines(lines)
+        # notify the parent to update project name
+        self.com.proj_name_changed.emit(proj_name, proj_file)
         self.close()
 

@@ -160,6 +160,13 @@ class JouFileModel(object):
         lines = ''.join(lines)
 
         # define regex patterns
+        psub_case_file = re.compile((r'(Select File\*FilterText"\s*").*?'
+                '(".*?Select File\*Text"\s*").*?\.cas'), re.S)
+        psub_udf_path = re.compile((r'(FunctionsSubMenu\*Interpreted.*?'
+                'Select File\*FilterText"\s*").*?(".*?Select File\*Text"\s*")'
+                '.*?\.c'), re.S)
+        psub_udf_file = re.compile((r'(Interpreted UDFs\*TextEntry1\(Source '
+                'File Name\)"\s*").*"'))
         psub_backfill_density = re.compile((r'(Materials\*Table1\*Frame1\*'
                 'Table1\*DropDownList4\(Materials\).*?\(\s*1\).*?'
                 'Frame4\*Frame2\*RealEntry3.*?)\d+'), re.S)
@@ -199,10 +206,21 @@ class JouFileModel(object):
         psub_totaltime = re.compile(r'(Number of Time Steps.*?)\d+')
 
         # update case file
-        # TODO: params['case_file']
+        case_fpath = params['case_file'].split(r'/')
+        case_fname = case_fpath[-1]
+        # approved that '/' is okay
+        case_fpath = '/'.join(case_fpath[0:-1])
+        repl = r'\g<1>%s\g<2>%s' % (case_fpath + '/*', case_fname)
+        lines = psub_case_file.sub(repl, lines, 1)
 
         # update udf file
-        # TODO: params['udf_file']
+        udf_fpath = params['udf_file'].split(r'/')
+        udf_fname = udf_fpath[-1]
+        udf_fpath = '/'.join(udf_fpath[0:-1])
+        repl = r'\g<1>%s\g<2>%s' % (udf_fpath + '/*', udf_fname)
+        lines = psub_udf_path.sub(repl, lines, 1)
+        repl = r'\g<1>%s"' % params['udf_file']
+        lines = psub_udf_file.sub(repl, lines, 1)
 
         # update materials
         # backfill
@@ -253,7 +271,10 @@ class JouFileModel(object):
 
         # write file back
         # TODO
-        os.rename(fname, '%s.old' % fname)
+        backup_fname = '%s.old' % fname
+        if os.path.exists(backup_fname):
+            os.remove(backup_fname)
+        os.rename(fname, backup_fname)
         with open(fname, 'w') as wfh:
              wfh.write(lines)
         return True
@@ -274,7 +295,8 @@ class UdfFileModel(object):
         self.param_names = set([
                 'copc_f', 'copc_m', 'copc_n', 'copc_a', 'copc_b', 'copc_c',
                 'copc_d', 'copc_e', 'coph_f', 'coph_m', 'coph_n', 'coph_a',
-                'coph_b', 'coph_c', 'coph_d', 'coph_e'
+                'coph_b', 'coph_c', 'coph_d', 'coph_e', 
+                'copc_max_q', 'coph_max_q'
                 ])
 
     def read_params(self, fname=None):
@@ -309,9 +331,14 @@ class UdfFileModel(object):
         with open(fname, 'r') as rfh:
             lines = rfh.readlines()
         lines = ''.join(lines)
+        # replace the load file name, remove the absolute path
+        load_fname = params['load_file'].split(r'/')[-1]
         lines = re.sub(r'(\*fname\s*=\s*").*"', 
-                        r'\g<1>%s"' % params['load_file'], lines)
-        print r'\g<1>%s"' % params['load_file']
+                        r'\g<1>%s"' % load_fname, lines)
+        # calculate the max q
+#        (copc_max_q, coph_max_q) = self.calc_max_min_q(fname=params['load_file'])
+#        params['copc_max_q'] = copc_max_q
+#        params['coph_max_q'] = coph_max_q
         for param in self.param_names:
             # any paramter is not found, stop update
             if not params.has_key(param):
@@ -320,8 +347,30 @@ class UdfFileModel(object):
                     r'\g<1>%s' % params[param], lines)
         # write lines back
         # TODO
-        os.rename(fname, '%s.old' % fname)
+        backup_fname = '%s.old' % fname
+        if os.path.exists(backup_fname):
+            os.remove(backup_fname)
+        os.rename(fname, backup_fname)
         with open(fname, 'w') as wrh:
             wrh.write(lines)
         return True
+
+    def calc_max_min_q(self, fname):
+        """
+        Calculate the max and min Q value of load.
+        """
+        max_q = 0.0
+        min_q = 0.0
+        with open(fname, 'r') as rfh:
+            for line in rfh:
+                val = float(line)
+                print val
+                if val > max_q:
+                    max_q = val
+                if val < min_q:
+                    min_q = val
+        print 'max=', max_q, 'min=', min_q
+        return (max_q, min_q)
+
+
     

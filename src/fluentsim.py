@@ -13,13 +13,14 @@ import re
 import os
 
 from PyQt4 import QtCore, QtGui
-from PyQt4.QtCore import pyqtSignature, pyqtSlot
-from PyQt4.QtGui import QMainWindow
+from PyQt4.QtCore import pyqtSlot, QThread
+from PyQt4.QtGui import QMainWindow, QProgressDialog
 
 from newprojdialog import NewProjDialog
 from uimainwindow import UiMainWindow
 
 from models import JouFileModel, UdfFileModel
+import imagesrc
 
 
 class FluentSim(QMainWindow, UiMainWindow):
@@ -34,23 +35,34 @@ class FluentSim(QMainWindow, UiMainWindow):
         """
         QMainWindow.__init__(self, parent)
         self.setupUi(self)
-
+        self.setWindowIcon(QtGui.QIcon(":/images/fluentsim-logo.png"))
+        self.setFixedSize(750, 570)
         # initiate models
         self.jou_model = JouFileModel()
         self.udf_model = UdfFileModel()
-
         # arritures
         self.proj_name = ''
     
-    @pyqtSignature("")
+    @pyqtSlot()
     def on_btn_run_sim_clicked(self):
         """
         Slot documentation goes here.
         """
-        # TODO: not implemented yet
-        raise NotImplementedError
+        # check fluent path
+        fluent_path = str(self.le_fluent_path.text())
+        exe_file = fluent_path.split(r'/')[-1]
+        if exe_file != 'fluent.exe':
+            msg = u'Fluent路径无效，程序启动失败'
+            self._show_tips(msg)
+        # check journal file
+        jou_file = str(self.le_fluent_jou_file.text())
+        if jou_file == '' or (not os.path.exists(jou_file)):
+            msg = u'Journal文件路径无效，程序启动失败'
+            self._show_tips(msg)
+        cmd = '%s 3ddp -i %s' % (fluent_path, jou_file)
+        os.system(cmd)
 
-    @pyqtSignature("")
+    @pyqtSlot()
     def on_btn_load_jou_param_clicked(self):
         """
         Load paramters from the journal file to widgets.
@@ -76,7 +88,7 @@ class FluentSim(QMainWindow, UiMainWindow):
             msg = u'Journal文件加载失败, 请检查Journal文件%s的有效性!' % fname
             self._show_tips(msg, tip_type=1)
 
-    @pyqtSignature("")
+    @pyqtSlot()
     def on_btn_load_udf_param_clicked(self):
         """
         Slot documentation goes here.
@@ -103,18 +115,16 @@ class FluentSim(QMainWindow, UiMainWindow):
             self._show_tips(msg, tip_type=1)
 
     
-    @pyqtSignature("")
+    @pyqtSlot()
     def on_btn_save_jou_param_clicked(self):
         """
         Save all fluent journal params to file.
         """
-        msg = u'保存所有Jou文件参数，确定吗?'
+        msg = u'保存所有仿真参数包括Case和UDF文件，确定吗?'
         reply = self.show_yesno_msgbox(msg)
         if reply == 0:
             return
-        # first, get params from widgets
-        params = self.get_fluent_param_from_widgets()
-        # second, modify the jou file
+        # check the validation of jou file
         fname = self.le_fluent_jou_file.text()
         if fname == '':
             msg = u'Jou文件名为空, 请先设置一个有效的Jou文件'
@@ -126,6 +136,9 @@ class FluentSim(QMainWindow, UiMainWindow):
             self._show_tips(msg, tip_type=1)
             return
 
+        # get params from widgets
+        params = self.get_fluent_param_from_widgets()
+        # update jou file
         result = self.jou_model.write_params(params, fname)
         if result == True:
             msg = u'文件%s更新成功' % fname
@@ -134,7 +147,7 @@ class FluentSim(QMainWindow, UiMainWindow):
             msg = u'文件更新失败, 请确保%s是有效的Jou文件' % fname
             self._show_tips(msg, tip_type=1)
     
-    @pyqtSignature("")
+    @pyqtSlot()
     def on_btn_save_udf_param_clicked(self):
         """
         Slot documentation goes here.
@@ -143,9 +156,6 @@ class FluentSim(QMainWindow, UiMainWindow):
         reply = self.show_yesno_msgbox(msg)
         if reply == 0:
             return
-        # first, get params from widgets
-        params = self.get_udf_param_from_widgets()
-        # second, modify the udf file
         fname = self.le_fluent_udf_file.text()
         if fname == '':
             msg = u'UDF文件名为空, 请先设置一个有效的UDF文件'
@@ -157,6 +167,39 @@ class FluentSim(QMainWindow, UiMainWindow):
             self._show_tips(msg, tip_type=1)
             return
 
+        # first, get params from widgets
+        params = self.get_udf_param_from_widgets()
+        # read the load file
+        progress_dlg = QProgressDialog(self)
+        progress_dlg.setModal(True)
+        progress_dlg.setMinimumDuration(1)  
+        progress_dlg.setWindowTitle(u"处理数据")  
+        progress_dlg.setLabelText(u"正在处理建筑负荷数据...")  
+        progress_dlg.setCancelButtonText("Cancel")  
+        # we don't know how many lines in the load file
+        progress_dlg.setMinimum(1)
+        progress_dlg.setMaximum(10000)
+        max_q = 0.0
+        min_q = 0.0
+        line_cnt = 0
+        with open(params['load_file'], 'r') as rfh:
+            for line in rfh:
+                val = float(line)
+                if val > max_q:
+                    max_q = val
+                if val < min_q:
+                    min_q = val
+                progress_dlg.setValue(line_cnt)  
+                if progress_dlg.wasCanceled():
+                    return
+                line_cnt += 1
+        # set the max value to terminate the progress dialog
+        if line_cnt < 10000:
+            QThread.sleep(1)
+            progress_dlg.setValue(10000)  
+        params['copc_max_q'] = max_q
+        params['coph_max_q'] = min_q
+        # modify the udf file
         result = self.udf_model.write_params(params, fname)
         if result == True:
             msg = u'文件%s更新成功' % fname
@@ -165,7 +208,7 @@ class FluentSim(QMainWindow, UiMainWindow):
             msg = u'文件更新失败, 请确保%s是有效的UDF文件' % fname
             self._show_tips(msg, tip_type=1)
     
-    @pyqtSignature("")
+    @pyqtSlot()
     def on_btn_open_fluent_cas_clicked(self):
         """
         Slot documentation goes here.
@@ -181,7 +224,7 @@ class FluentSim(QMainWindow, UiMainWindow):
             msg = u'新的Case文件已打开, 若想保存至当前工程，请点击保存工程按钮'
             self._show_tips(msg)
     
-    @pyqtSignature("")
+    @pyqtSlot()
     def on_btn_open_fluent_jou_clicked(self):
         """
         Slot documentation goes here.
@@ -197,7 +240,7 @@ class FluentSim(QMainWindow, UiMainWindow):
             msg = u'新的Jou文件已打开, 若想保存至当前工程，请点击保存工程按钮'
             self._show_tips(msg)
     
-    @pyqtSignature("")
+    @pyqtSlot()
     def on_btn_open_fluent_udf_clicked(self):
         """
         Slot documentation goes here.
@@ -213,7 +256,7 @@ class FluentSim(QMainWindow, UiMainWindow):
             msg = u'新的UDF文件已打开, 若想保存至当前工程，请点击保存工程按钮'
             self._show_tips(msg)
     
-    @pyqtSignature("")
+    @pyqtSlot()
     def on_btn_open_fluent_load_clicked(self):
         """
         Slot documentation goes here.
@@ -223,13 +266,15 @@ class FluentSim(QMainWindow, UiMainWindow):
             reply = self.show_yesno_msgbox(msg)
             if reply == 0:
                 return
+        msg = u'请保证建筑负荷文件与UDF文件在同一目录下'
+        self._show_tips(msg)
         fname = self.show_file_dialog('Fluent load file (*)')
         if fname != '':
             self.le_fluent_load_file.setText(fname)
             msg = u'新的建筑负荷文件已打开, 若想保存至当前工程，请点击保存工程按钮'
             self._show_tips(msg)
 
-    @pyqtSignature("")
+    @pyqtSlot()
     def on_btn_open_fluent_path_clicked(self):
         """
         Slot documentation goes here.
@@ -240,7 +285,7 @@ class FluentSim(QMainWindow, UiMainWindow):
             msg = u'Fluent程序路径已设置'
             self._show_tips(msg)
     
-    @pyqtSignature("")
+    @pyqtSlot()
     def on_btn_open_proj_clicked(self):
         """
         open project file button is clicked
@@ -264,7 +309,7 @@ class FluentSim(QMainWindow, UiMainWindow):
             self.le_fluent_load_file.setText(self.fluent_load_file)
             self.le_fluent_path.setText(self.fluent_exe_path)
     
-    @pyqtSignature("")
+    @pyqtSlot()
     def on_btn_new_proj_clicked(self):
         """
         New a project
@@ -272,7 +317,7 @@ class FluentSim(QMainWindow, UiMainWindow):
         dialog = NewProjDialog(self)
         dialog.show()
     
-    @pyqtSignature("")
+    @pyqtSlot()
     def on_btn_save_proj_clicked(self):
         """
         Slot documentation goes here.
@@ -298,33 +343,41 @@ class FluentSim(QMainWindow, UiMainWindow):
             msg = u'项目文件%s保存失败' % proj_fname
             self._show_tips(msg, tip_type=1)
     
-    @pyqtSignature("")
+    @pyqtSlot()
     def on_action_menu_quit_triggered(self):
         """
         Slot documentation goes here.
         """
-        # TODO: not implemented yet
-        raise NotImplementedError
+        msg = u'确定退出吗?'
+        reply = self.show_yesno_msgbox(msg)
+        if reply == 1:
+            self.close()
     
-    @pyqtSignature("")
+    @pyqtSlot()
     def on_action_menu_about_triggered(self):
         """
         Slot documentation goes here.
         """
-        # TODO: not implemented yet
-        raise NotImplementedError
+        msg = QtCore.QT_TR_NOOP("<p><b><font size=5 color='green'>FluentSim"
+                        "</font></b><br>"
+                        "<p style='font-size:100%;color:black'>"
+                       u"中国建筑设计咨询公司</p>"
+                       u"版权所有(c)2015</p>"
+                       )
+        QtGui.QMessageBox.about(self, self.tr("About"), msg)
 
-    @pyqtSlot(str)
-    def change_proj_name(self, name):
-        self.proj_name = name
-        print 'change_proj_name is called'
+    @pyqtSlot(str, str)
+    def change_proj_name(self, pname, pfile):
+        self.proj_name = pname
+        self.le_proj_file.setText(pfile)
+        self.setWindowTitle(u'工程 - %s' % self.proj_name)
 
     def _get_dict_val(self, d, key):
         if d.has_key(key):
             return d[key]
         else:
             return ''
-    
+
     def _show_tips(self, msg, tip_type=0):
         """
         Pop information tips.
@@ -383,7 +436,7 @@ class FluentSim(QMainWindow, UiMainWindow):
         Read the project file
         """
         lines = []
-        lines.append("[ProjectName]=%s\n" % self.le_proj_file.text())
+        lines.append("[ProjectName]=%s\n" % self.proj_name)
         lines.append("[FluentJournal]=%s\n" % self.le_fluent_jou_file.text())
         lines.append("[FluentCase]=%s\n" % self.le_fluent_cas_file.text())
         lines.append("[FluentUdf]=%s\n" % self.le_fluent_udf_file.text())
@@ -426,29 +479,117 @@ class FluentSim(QMainWindow, UiMainWindow):
         params = {}
 
         # file
-        params['case_file'] = str(self.le_fluent_cas_file.text())
-        params['udf_file'] = str(self.le_fluent_udf_file.text())
+        text = str(self.le_fluent_cas_file.text())
+        if text == '':
+            msg = u'Case文件不能为空'
+            self._show_tips(msg, tip_type=1)
+            return
+        params['case_file'] = text
+        text = str(self.le_fluent_udf_file.text())
+        if text == '':
+            msg = u'UDF文件不能为空'
+            self._show_tips(msg, tip_type=1)
+            return
+        params['udf_file'] = text
         # simualtion paramters
-        params['backfill_heat_coeff'] = str(self.le_backfill_heat_coeff.text())
-        params['backfill_density'] = str(self.le_backfill_density.text())
-        params['backfill_spec_heat'] = str(self.le_backfill_spec_heat.text())
-        params['pipe_heat_coeff'] = str(self.le_pipe_heat_coeff.text())
-        params['pipe_density'] = str(self.le_pipe_density.text())
-        params['pipe_spec_heat'] = str(self.le_pipe_spec_heat.text())
-        params['soil_heat_coeff'] = str(self.le_soil_heat_coeff.text())
-        params['soil_density'] = str(self.le_soil_density.text())
-        params['soil_spec_heat'] = str(self.le_soil_spec_heat.text())
-        params['ground_temp'] = str(self.le_init_ground_temp.text())
-        params['loop_velocity'] = str(self.le_loop_velocity.text())
-        params['loop_diameter'] = str(self.le_loop_hydr_diameter.text())
-        conv_float = float(self.le_loop_intensity.text()) / 100.0
+        text = str(self.le_backfill_heat_coeff.text())
+        if text == '':
+            msg = u'回填材料导热系数不能为空'
+            self._show_tips(msg, tip_type=1)
+            return
+        params['backfill_heat_coeff'] = text
+        text = str(self.le_backfill_density.text())
+        if text == '':
+            msg = u'回填材料密度不能为空'
+            self._show_tips(msg, tip_type=1)
+            return
+        params['backfill_density'] = text
+        text = str(self.le_backfill_spec_heat.text())
+        if text == '':
+            msg = u'回填材料比热不能为空'
+            self._show_tips(msg, tip_type=1)
+            return
+        params['backfill_spec_heat'] = text
+        text = str(self.le_pipe_heat_coeff.text())
+        if text == '':
+            msg = u'管道导热系数不能为空'
+            self._show_tips(msg, tip_type=1)
+            return
+        params['pipe_heat_coeff'] = text
+        text = str(self.le_pipe_density.text())
+        if text == '':
+            msg = u'管道密度不能为空'
+            self._show_tips(msg, tip_type=1)
+            return
+        params['pipe_density'] = text
+        text = str(self.le_pipe_spec_heat.text())
+        if text == '':
+            msg = u'管道比热不能为空'
+            self._show_tips(msg, tip_type=1)
+            return
+        params['pipe_spec_heat'] = text
+        text = str(self.le_soil_heat_coeff.text())
+        if text == '':
+            self._show_tips(msg, tip_type=1)
+            msg = u'土壤导热系数不能为空'
+            return
+        params['soil_heat_coeff'] = text
+        text = str(self.le_soil_density.text())
+        if text == '':
+            msg = u'土壤密度不能为空'
+            self._show_tips(msg, tip_type=1)
+            return
+        params['soil_density'] = text
+        text = str(self.le_soil_spec_heat.text())
+        if text == '':
+            msg = u'土壤比热不能为空'
+            self._show_tips(msg, tip_type=1)
+            return
+        params['soil_spec_heat'] = text
+        text = str(self.le_init_ground_temp.text())
+        if text == '':
+            msg = u'初始地温不能为空'
+            self._show_tips(msg, tip_type=1)
+            return
+        params['ground_temp'] = text
+        text = str(self.le_loop_velocity.text())
+        if text == '':
+            msg = u'循环体流速不能为空'
+            self._show_tips(msg, tip_type=1)
+            return
+        params['loop_velocity'] = text
+        text = str(self.le_loop_hydr_diameter.text())
+        if text == '':
+            msg = u'循环体水力直径不能为空'
+            self._show_tips(msg, tip_type=1)
+            return
+        params['loop_diameter'] = text
+        text = str(self.le_loop_intensity.text())
+        if text == '':
+            msg = u'循环体紊流强度不能为空'
+            self._show_tips(msg, tip_type=1)
+            return
+        conv_float = float(text) / 100.0
         params['loop_intensity'] = '%s' % conv_float
         # iterate time
-        params['time_step'] = str(self.le_fluent_time_step.text())
-        params['time_year'] = str(self.le_fluent_time_year.text())
-        params['time_month'] = str(self.le_fluent_time_month.text())
-        params['time_day'] = str(self.le_fluent_time_day.text())
-        params['time_hour'] = str(self.le_fluent_time_hour.text())
+        text = str(self.le_fluent_time_step.text())
+        if text == '':
+            msg = u'时间步长不能为空'
+            self._show_tips(msg, tip_type=1)
+            return
+        params['time_step'] = text
+        text_year = str(self.le_fluent_time_year.text())
+        text_month = str(self.le_fluent_time_month.text())
+        text_day = str(self.le_fluent_time_day.text())
+        text_hour = str(self.le_fluent_time_hour.text())
+        if text_year == '' and text_month == '' and text_day == '' and text_hour == '':
+            msg = u'时间不能全为空'
+            self._show_tips(msg, tip_type=1)
+            return
+        params['time_year'] = text_year
+        params['time_month'] = text_month
+        params['time_day'] = text_day
+        params['time_hour'] = text_hour
         return params
 
     def fresh_udf_param_widgets(self, params):
@@ -477,25 +618,108 @@ class FluentSim(QMainWindow, UiMainWindow):
         Get udf paramters from line edits.
         """
         params = {}
-        params['copc_f'] = str(self.le_formula_copc_f.text())
-        params['copc_m'] = str(self.le_formula_copc_m.text())
-        params['copc_n'] = str(self.le_formula_copc_n.text())
-        params['copc_a'] = str(self.le_formula_copc_a.text())
-        params['copc_b'] = str(self.le_formula_copc_b.text())
-        params['copc_c'] = str(self.le_formula_copc_c.text())
-        params['copc_d'] = str(self.le_formula_copc_d.text())
-        params['copc_e'] = str(self.le_formula_copc_e.text())
-        params['coph_f'] = str(self.le_formula_coph_f.text())
-        params['coph_m'] = str(self.le_formula_coph_m.text())
-        params['coph_n'] = str(self.le_formula_coph_n.text())
-        params['coph_a'] = str(self.le_formula_coph_a.text())
-        params['coph_b'] = str(self.le_formula_coph_b.text())
-        params['coph_c'] = str(self.le_formula_coph_c.text())
-        params['coph_d'] = str(self.le_formula_coph_d.text())
-        params['coph_e'] = str(self.le_formula_coph_e.text())
+        text = str(self.le_formula_copc_f.text())
+        if text == '':
+            msg = u'copc_f不能为空'
+            self._show_tips(msg, tip_type=1)
+            return
+        params['copc_f'] = text
+        text = str(self.le_formula_copc_m.text())
+        if text == '':
+            msg = u'copc_m不能为空'
+            self._show_tips(msg, tip_type=1)
+            return
+        params['copc_m'] = text
+        text = str(self.le_formula_copc_n.text())
+        if text == '':
+            msg = u'copc_n不能为空'
+            self._show_tips(msg, tip_type=1)
+            return
+        params['copc_n'] = text
+        text = str(self.le_formula_copc_a.text())
+        if text == '':
+            msg = u'copc_a不能为空'
+            self._show_tips(msg, tip_type=1)
+            return
+        params['copc_a'] = text
+        text = str(self.le_formula_copc_b.text())
+        if text == '':
+            msg = u'copc_b不能为空'
+            self._show_tips(msg, tip_type=1)
+            return
+        params['copc_b'] = text
+        text = str(self.le_formula_copc_c.text())
+        if text == '':
+            msg = u'copc_c不能为空'
+            self._show_tips(msg, tip_type=1)
+            return
+        params['copc_c'] = text
+        text = str(self.le_formula_copc_d.text())
+        if text == '':
+            msg = u'copc_d不能为空'
+            self._show_tips(msg, tip_type=1)
+            return
+        params['copc_d'] = text
+        text = str(self.le_formula_copc_e.text())
+        if text == '':
+            msg = u'copc_e不能为空'
+            self._show_tips(msg, tip_type=1)
+            return
+        params['copc_e'] = text
+        text = str(self.le_formula_coph_f.text())
+        if text == '':
+            msg = u'coph_f不能为空'
+            self._show_tips(msg, tip_type=1)
+            return
+        params['coph_f'] = text
+        text = str(self.le_formula_coph_m.text())
+        if text == '':
+            msg = u'coph_m不能为空'
+            self._show_tips(msg, tip_type=1)
+            return
+        params['coph_m'] = text
+        text = str(self.le_formula_coph_n.text())
+        if text == '':
+            msg = u'coph_n不能为空'
+            self._show_tips(msg, tip_type=1)
+            return
+        params['coph_n'] = text
+        text = str(self.le_formula_coph_a.text())
+        if text == '':
+            msg = u'coph_a不能为空'
+            self._show_tips(msg, tip_type=1)
+            return
+        params['coph_a'] = text
+        text = str(self.le_formula_coph_b.text())
+        if text == '':
+            msg = u'coph_b不能为空'
+            self._show_tips(msg, tip_type=1)
+            return
+        params['coph_b'] = text
+        text = str(self.le_formula_coph_c.text())
+        if text == '':
+            msg = u'coph_c不能为空'
+            self._show_tips(msg, tip_type=1)
+            return
+        params['coph_c'] = text
+        text = str(self.le_formula_coph_d.text())
+        if text == '':
+            msg = u'coph_d不能为空'
+            self._show_tips(msg, tip_type=1)
+            return
+        params['coph_d'] = text
+        text = str(self.le_formula_coph_e.text())
+        if text == '':
+            msg = u'coph_e不能为空'
+            self._show_tips(msg, tip_type=1)
+            return
+        params['coph_e'] = text
+
         load_fname = str(self.le_fluent_load_file.text())
-        load_fname = re.sub(r'/', r'\\\\\\\\', load_fname)
-        print load_fname
+        if load_fname == '':
+            msg = u'建筑负载文件不能为空'
+            self._show_tips(msg, tip_type=1)
+            return
         params['load_file'] = load_fname
         return params
 
