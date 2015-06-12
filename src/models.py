@@ -11,10 +11,6 @@ Date  : Apr 21, 2015
 import re
 import os
 
-# Constants
-SECONDS_IN_DAY   = 3600 * 24
-SECONDS_IN_MONTH = SECONDS_IN_DAY * 30
-SECONDS_IN_YEAR  = SECONDS_IN_DAY * 365
 
 class JouFileModel(object):
     """
@@ -35,38 +31,54 @@ class JouFileModel(object):
     def get_filename(self, path):
         return self.filename
 
+    def _read_file(self, fname=None):
+        """Read all file lines"""
+        if fname == None:
+            if self.filename == '':
+                return False
+            else:
+                fname = self.filename
+        # read all lines and merge it into a single string
+        with open(fname, 'r') as rfh:
+            lines = rfh.readlines()
+        return ''.join(lines)
+
+    def _write_file(self, fname, lines):
+        """Write all lines into a file"""
+        backup_fname = '%s.old' % fname
+        if os.path.exists(backup_fname):
+            os.remove(backup_fname)
+        os.rename(fname, backup_fname)
+        with open(fname, 'w') as wfh:
+             wfh.write(lines)
+        # TODO
+        #os.remove(backup_fname)
+        return True
+
     def read_params(self, fname=None):
         """
         Read fluent journal file.
         """
-        if fname == None:
-            if self.filename == '':
-                return None
-            else:
-                fname = self.filename
-
-        # read all lines and marge it into a single string
-        with open(fname, 'r') as fh:
-             lines = fh.readlines()
-        lines = ''.join(lines)
-        params = {}
+        # read all lines
+        lines = self._read_file(fname)
 
         # define regex patterns
+        pmat_axis_z = (r"Scale Grid.*Scale Factors.*\(Z\).*\(\s*([0-9.]+)\)")
         pmat_materials = (r"Materials\*Table1\*Frame1\*Table1\*DropDownList4"
                         "\(Materials\).*?(\d)(.*?)\(Change/Create\)")
         pmat_mat_attr = (r"Materials\*Frame2\(Properties\)\*Table2\(Properties\)"
                         "\*Frame(\d)\*Frame2\*RealEntry3.*?\(\s*([0-9.]+)\)")
-        pmat_velocity = (r"velocity-inlet-(\d+)-1.*Velocity Magnitude"
-                        ".*\(\s*([0-9.]+)\)")
-        pmat_intensity = (r"velocity-inlet-(\d+)-1.*Turbulent Intensity"
-                        ".*\(\s*([0-9.]+)\)")
-        pmat_diameter = (r"velocity-inlet-(\d+)-1.*Hydraulic Diameter"
-                        ".*\(\s*([0-9.]+)\)")
+        pmat_velocity = (r"Velocity Magnitude.*\(\s*([0-9.]+)\)")
         pmat_temperature = (r"Solution Initialization.*\(Temperature\)"
                         ".*\(\s*([0-9.]+)\)")
-        pmat_timestep = r"Time Step Size.*\(\s*(\d+)\)"
-        pmat_totaltime = r"Number of Time Steps.*?(\d+)"
 
+        params = {}
+        # search axis z
+        res = re.search(pmat_axis_z, lines)
+        if res:
+            params['pipe_depth'] = '%s' % (float(res.group(1)) * 100)
+        else:
+            print 'Axis Z not found'
         # search materials paramters
         # ignore \n
         res = re.findall(pmat_materials, lines, re.S)
@@ -75,15 +87,15 @@ class JouFileModel(object):
             res1 = re.findall(pmat_mat_attr, text)
             if len(res1) == 3:
                 material_dict = dict((key,val) for key, val in res1)
-                if num == '1':
+                if num == '0':
                     params['backfill_density']    = material_dict['4']
                     params['backfill_spec_heat']  = material_dict['8']
                     params['backfill_heat_coeff'] = material_dict['9']
-                elif num == '2':
+                elif num == '1':
                     params['pipe_density']    = material_dict['4']
                     params['pipe_spec_heat']  = material_dict['8']
                     params['pipe_heat_coeff'] = material_dict['9']
-                elif num == '3':
+                elif num == '2':
                     params['soil_density']    = material_dict['4']
                     params['soil_spec_heat']  = material_dict['8']
                     params['soil_heat_coeff'] = material_dict['9']
@@ -96,21 +108,9 @@ class JouFileModel(object):
         res = re.findall(pmat_velocity, lines)
         if len(res) >= 2:
             # two velocities are same, just pick one
-            params['loop_velocity'] = res[0][1]
+            params['loop_velocity'] = res[0]
         else:
             print 'Velocity not found'
-        res = re.findall(pmat_intensity, lines)
-        if len(res) >= 2:
-            # two intensities are same, just pick one and convert it to %
-            params['loop_intensity'] = res[0][1]
-        else:
-            print 'Intensity not found'
-        res = re.findall(pmat_diameter, lines)
-        if len(res) >=2:
-            # two diameters are same, just pick one
-            params['loop_diameter'] = res[0][1]
-        else:
-            print 'Diameter not found'
 
         # search initial groud temperature
         res = re.search(pmat_temperature, lines)
@@ -118,29 +118,6 @@ class JouFileModel(object):
             params['ground_temp'] = res.group(1)
         else:
             print 'Ground temperature not found!'
-
-        # search simulation iteration time
-        res = re.search(pmat_timestep, lines)
-        if res:
-            params['time_step'] = res.group(1)
-        else:
-            print 'Time step not found!'
-        res = re.search(pmat_totaltime, lines)
-        if res:
-            total_seconds = int(res.group(1)) * int(params['time_step'])
-            year = total_seconds / SECONDS_IN_YEAR
-            remaining_seconds = total_seconds - SECONDS_IN_YEAR * year
-            month = remaining_seconds / SECONDS_IN_MONTH
-            remaining_seconds -= month * SECONDS_IN_MONTH
-            day = remaining_seconds / SECONDS_IN_DAY
-            remaining_seconds -= day * SECONDS_IN_DAY
-            hour = remaining_seconds / 3600
-            params['time_year'] = '%s' % year
-            params['time_month'] = '%s' % month
-            params['time_day'] = '%s' % day
-            params['time_hour'] = '%s' % hour
-        else:
-            print 'Number of time steps not found!'
         return params
 
     def write_params(self, params, fname=None):
@@ -160,68 +137,57 @@ class JouFileModel(object):
         lines = ''.join(lines)
 
         # define regex patterns
-        psub_case_file = re.compile((r'(Select File\*FilterText"\s*").*?'
+        psub_input_case = re.compile((r'(Select File\*FilterText"\s*").*?'
                 '(".*?Select File\*Text"\s*").*?\.cas'), re.S)
-        psub_udf_path = re.compile((r'(FunctionsSubMenu\*Interpreted.*?'
-                'Select File\*FilterText"\s*").*?(".*?Select File\*Text"\s*")'
-                '.*?\.c'), re.S)
-        psub_udf_file = re.compile((r'(Interpreted UDFs\*TextEntry1\(Source '
-                'File Name\)"\s*").*"'))
+        psub_output_case = re.compile((r'(MenuBar\*WriteSubMenu\*Case.*?'
+                '"Select File\*Text"\s*").*?\.cas'), re.S)
+        psub_axis_z = re.compile((r'(Scale Grid.*Scale Factors.*\(Z\)'
+                '.*\(\s*)[0-9.]+'))
         psub_backfill_density = re.compile((r'(Materials\*Table1\*Frame1\*'
-                'Table1\*DropDownList4\(Materials\).*?\(\s*1\).*?'
+                'Table1\*DropDownList4\(Materials\).*?\(\s*0\).*?'
                 'Frame4\*Frame2\*RealEntry3.*?)\d+'), re.S)
         psub_backfill_spec_heat = re.compile((r'(Materials\*Table1\*Frame1\*'
-                'Table1\*DropDownList4\(Materials\).*?\(\s*1\).*?'
+                'Table1\*DropDownList4\(Materials\).*?\(\s*0\).*?'
                 'Frame8\*Frame2\*RealEntry3.*?)\d+'), re.S)
         psub_backfill_heat_coeff = re.compile((r'(Materials\*Table1\*Frame1\*'
-                'Table1\*DropDownList4\(Materials\).*?\(\s*1\).*?'
+                'Table1\*DropDownList4\(Materials\).*?\(\s*0\).*?'
                 'Frame9\*Frame2\*RealEntry3.*?)[0-9.]+'), re.S)
         psub_pipe_density = re.compile((r'(Materials\*Table1\*Frame1\*'
-                'Table1\*DropDownList4\(Materials\).*?\(\s*2\).*?'
+                'Table1\*DropDownList4\(Materials\).*?\(\s*1\).*?'
                 'Frame4\*Frame2\*RealEntry3.*?)\d+'), re.S)
         psub_pipe_spec_heat = re.compile((r'(Materials\*Table1\*Frame1\*'
-                'Table1\*DropDownList4\(Materials\).*?\(\s*2\).*?'
+                'Table1\*DropDownList4\(Materials\).*?\(\s*1\).*?'
                 'Frame8\*Frame2\*RealEntry3.*?)\d+'), re.S)
         psub_pipe_heat_coeff = re.compile((r'(Materials\*Table1\*Frame1\*'
-                'Table1\*DropDownList4\(Materials\).*?\(\s*2\).*?'
+                'Table1\*DropDownList4\(Materials\).*?\(\s*1\).*?'
                 'Frame9\*Frame2\*RealEntry3.*?)[0-9.]+'), re.S)
         psub_soil_density = re.compile((r'(Materials\*Table1\*Frame1\*'
-                'Table1\*DropDownList4\(Materials\).*?\(\s*3\).*?'
+                'Table1\*DropDownList4\(Materials\).*?\(\s*2\).*?'
                 'Frame4\*Frame2\*RealEntry3.*?)\d+'), re.S)
         psub_soil_spec_heat = re.compile((r'(Materials\*Table1\*Frame1\*'
-                'Table1\*DropDownList4\(Materials\).*?\(\s*3\).*?'
+                'Table1\*DropDownList4\(Materials\).*?\(\s*2\).*?'
                 'Frame8\*Frame2\*RealEntry3.*?)\d+'), re.S)
         psub_soil_heat_coeff = re.compile((r'(Materials\*Table1\*Frame1\*'
-                'Table1\*DropDownList4\(Materials\).*?\(\s*3\).*?'
+                'Table1\*DropDownList4\(Materials\).*?\(\s*2\).*?'
                 'Frame9\*Frame2\*RealEntry3.*?)[0-9.]+'), re.S)
-        psub_velocity = re.compile((r'(velocity-inlet-1[57]-1.*Velocity '
-                'Magnitude.*\(\s*)[0-9.]+'))
-        psub_intensity = re.compile((r'(velocity-inlet-1[57]-1.*Turbulent '
-                'Intensity.*\(\s*)[0-9.]+'))
-        psub_diameter = re.compile((r'(velocity-inlet-1[57]-1.*Hydraulic '
-                'Diameter.*\(\s*)[0-9.]+'))
-        psub_temperature = re.compile((r'(Solution Initialization.*\(Temp'
-                'erature\).*\(\s*)[0-9.]+'))
-        psub_timestep = re.compile(r'(Time Step Size.*\(\s*)\d+')
-        psub_totaltime = re.compile(r'(Number of Time Steps.*?)\d+')
+        psub_velocity = re.compile((r'(Velocity\s+Magnitude.*\(\s*)[0-9.]+'))
+        psub_temperature = re.compile((r'(Solution Initialization.*Temp'
+                'erature.*\(\s*)[0-9.]+'))
 
         # update case file
-        case_fpath = params['case_file'].split(r'/')
+        case_fpath = params['input_case_file'].split(r'/')
         case_fname = case_fpath[-1]
         # approved that '/' is okay
         case_fpath = '/'.join(case_fpath[0:-1])
         repl = r'\g<1>%s\g<2>%s' % (case_fpath + '/*', case_fname)
-        lines = psub_case_file.sub(repl, lines, 1)
-
-        # update udf file
-        udf_fpath = params['udf_file'].split(r'/')
-        udf_fname = udf_fpath[-1]
-        udf_fpath = '/'.join(udf_fpath[0:-1])
-        repl = r'\g<1>%s\g<2>%s' % (udf_fpath + '/*', udf_fname)
-        lines = psub_udf_path.sub(repl, lines, 1)
-        repl = r'\g<1>%s"' % params['udf_file']
-        lines = psub_udf_file.sub(repl, lines, 1)
-
+        lines = psub_input_case.sub(repl, lines, 1)
+        case_fpath = params['output_case_file'].split(r'/')
+        repl = r'\g<1>%s' % case_fpath[-1]
+        lines = psub_output_case.sub(repl, lines, 1)
+        # update axis z
+        axis_z = float(params['pipe_depth']) / 100.0
+        repl = r'\g<1>%s' % axis_z
+        lines = psub_axis_z.sub(repl, lines, 1)
         # update materials
         # backfill
         repl = r'\g<1>%s' % params['backfill_density']
@@ -249,35 +215,62 @@ class JouFileModel(object):
         # inlet-1 & inlet-2
         repl = r'\g<1>%s' % params['loop_velocity']
         lines = psub_velocity.sub(repl, lines, 2)
-        repl = r'\g<1>%s' % params['loop_intensity']
-        lines = psub_intensity.sub(repl, lines, 2)
-        repl = r'\g<1>%s' % params['loop_diameter']
-        lines = psub_diameter.sub(repl, lines, 2)
 
         # update ground temperature
         repl = r'\g<1>%s' % params['ground_temp']
         lines = psub_temperature.sub(repl, lines, 1)
 
+        # write file back
+        return self._write_file(fname, lines)
+
+    def update_sim_time(self, params, fname=None):
+        """
+        Update the simulation time in fluent jou file. 
+        If file name is not specified, use self.filename.
+        """
+        lines = self._read_file(fname)
+        # define regex patterns
+        psub_input_case = re.compile((r'(Select File\*FilterText"\s*").*?'
+                '(".*?Select File\*Text"\s*").*?\.cas'), re.S)
+        psub_output_case = re.compile((r'(MenuBar\*WriteSubMenu\*Case.*?'
+                '"Select File\*Text"\s*").*?\.cas'), re.S)
+        psub_udf_path = re.compile((r'(FunctionsSubMenu\*Interpreted.*?'
+                'Select File\*FilterText"\s*").*?(".*?Select File\*Text"\s*")'
+                '.*?\.c'), re.S)
+        psub_udf_file = re.compile((r'(Interpreted UDFs\*TextEntry1\(Source '
+                'File Name\)"\s*").*"'))
+        psub_timestep = re.compile(r'(Time Step Size.*\(\s*)\d+')
+        psub_totaltime = re.compile(r'(Number of Time Steps.*?)\d+')
+
+        # update case file
+        case_fpath = params['input_case_file'].split(r'/')
+        case_fname = case_fpath[-1]
+        # approved that '/' is okay
+        case_fpath = '/'.join(case_fpath[0:-1])
+        repl = r'\g<1>%s\g<2>%s' % (case_fpath + '/*', case_fname)
+        lines = psub_input_case.sub(repl, lines, 1)
+        case_fpath = params['output_case_file'].split(r'/')
+        repl = r'\g<1>%s' % case_fpath[-1]
+        lines = psub_output_case.sub(repl, lines, 1)
+
+        # update udf file
+        udf_fpath = params['udf_file'].split(r'/')
+        udf_fname = udf_fpath[-1]
+        udf_fpath = '/'.join(udf_fpath[0:-1])
+        repl = r'\g<1>%s\g<2>%s' % (udf_fpath + '/*', udf_fname)
+        lines = psub_udf_path.sub(repl, lines, 1)
+        repl = r'\g<1>%s"' % params['udf_file']
+        lines = psub_udf_file.sub(repl, lines, 1)
+
         # update simulation time
         repl = r'\g<1>%s' % params['time_step']
         lines = psub_timestep.sub(repl, lines, 1)
-        total_seconds = int(params['time_year']) * SECONDS_IN_YEAR + \
-                        int(params['time_month']) * SECONDS_IN_MONTH + \
-                        int(params['time_day']) * SECONDS_IN_DAY + \
-                        int(params['time_hour']) * 3600
-        time_step_num = total_seconds / int(params['time_step'])
-        repl = r'\g<1>%s' % time_step_num
+        step_num = int(params['time_hour']) * 3600 / int(params['time_step'])
+        repl = r'\g<1>%s' % step_num
         lines = psub_totaltime.sub(repl, lines, 1)
 
         # write file back
-        # TODO
-        backup_fname = '%s.old' % fname
-        if os.path.exists(backup_fname):
-            os.remove(backup_fname)
-        os.rename(fname, backup_fname)
-        with open(fname, 'w') as wfh:
-             wfh.write(lines)
-        return True
+        return self._write_file(fname, lines)
 
 
 class UdfFileModel(object):

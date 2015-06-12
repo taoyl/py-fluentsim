@@ -11,6 +11,7 @@ Date  : Apr 21, 2015
 
 import re
 import os
+import subprocess
 
 from PyQt4 import QtCore, QtGui
 from PyQt4.QtCore import pyqtSlot, QThread
@@ -22,6 +23,7 @@ from uimainwindow import UiMainWindow
 from models import JouFileModel, UdfFileModel
 import imagesrc
 
+REMOVED_FILES = ['monitor-1.out',]
 
 class FluentSim(QMainWindow, UiMainWindow):
     """
@@ -42,23 +44,63 @@ class FluentSim(QMainWindow, UiMainWindow):
         self.udf_model = UdfFileModel()
         # arritures
         self.proj_name = ''
-    
+
     @pyqtSlot()
-    def on_btn_run_sim_clicked(self):
+    def on_btn_run_sim_phase1_clicked(self):
         """
         Slot documentation goes here.
         """
-        # check fluent path
-        fluent_path = str(self.le_fluent_path.text())
-        exe_file = fluent_path.split(r'/')[-1]
-        if exe_file != 'fluent.exe':
-            msg = u'Fluent路径无效，程序启动失败'
-            self._show_tips(msg)
+        fluent_path = self._check_fluent_exe_path()
+        if fluent_path == None:
+            return
         # check journal file
-        jou_file = str(self.le_fluent_jou_file.text())
+        jou_file = str(self.le_fluent_jou_file1.text())
+        if jou_file == '' or (not os.path.exists(jou_file)):
+            msg = u'稳态计算Journal文件路径无效，程序启动失败'
+            self._show_tips(msg)
+        # remove existing steady model
+        fnames = self._get_case_fname()
+        if os.path.exists(fnames['steady']):
+            os.remove(fnames['steady'])
+        fpath = fnames['steady'].split(r'/')
+        fpath[-1] = re.sub(r'\.cas', r'.dat', fpath[-1])
+        data_fname = '/'.join(fpath)
+        if os.path.exists(data_fname):
+            os.remove(data_fname)
+        # run fluent
+        cmd = '%s 3ddp -i %s' % (fluent_path, jou_file)
+        os.system(cmd) # non-blocking
+    
+    @pyqtSlot()
+    def on_btn_run_sim_phase2_clicked(self):
+        """
+        Slot documentation goes here.
+        """
+        fluent_path = self._check_fluent_exe_path()
+        if fluent_path == None:
+            return
+        # check journal file
+        jou_file = str(self.le_fluent_jou_file2.text())
         if jou_file == '' or (not os.path.exists(jou_file)):
             msg = u'Journal文件路径无效，程序启动失败'
             self._show_tips(msg)
+        # remove existing unsteady model
+        fnames = self._get_case_fname()
+        if os.path.exists(fnames['unsteady']):
+            os.remove(fnames['unsteady'])
+        fpath = fnames['unsteady'].split(r'/')
+        fpath[-1] = re.sub(r'\.cas', r'.dat', fpath[-1])
+        data_fname = '/'.join(fpath)
+        if os.path.exists(data_fname):
+            os.remove(data_fname)
+        # remove output files
+        fpath = fnames['native'].split(r'/')
+        for f in REMOVED_FILES:
+            fpath[-1] = f
+            fname = '/'.join(fpath)
+            if os.path.exists(fname):
+                os.remove(fname)
+        # run fluent
         cmd = '%s 3ddp -i %s' % (fluent_path, jou_file)
         os.system(cmd)
 
@@ -67,7 +109,7 @@ class FluentSim(QMainWindow, UiMainWindow):
         """
         Load paramters from the journal file to widgets.
         """
-        fname = self.le_fluent_jou_file.text()
+        fname = self.le_fluent_jou_file1.text()
         # check if file name is empty
         if fname == '':
             msg = u'Jou文件名为空, 请先打开一个Jou文件!'
@@ -120,19 +162,19 @@ class FluentSim(QMainWindow, UiMainWindow):
         """
         Save all fluent journal params to file.
         """
-        msg = u'保存所有仿真参数包括Case和UDF文件，确定吗?'
+        msg = u'保存所有仿真参数，确定吗?'
         reply = self.show_yesno_msgbox(msg)
         if reply == 0:
             return
         # check the validation of jou file
-        fname = self.le_fluent_jou_file.text()
+        fname = self.le_fluent_jou_file1.text()
         if fname == '':
-            msg = u'Jou文件名为空, 请先设置一个有效的Jou文件'
+            msg = u'稳态计算Jou文件名为空, 请先设置一个有效的Jou文件'
             self._show_tips(msg, tip_type=1)
             return
         # check if file path exists
         if not os.path.exists(fname):  
-            msg = u'Jou文件路径不存在, 请打开一个有效的Jou文件!'
+            msg = u'稳态计算Jou文件路径不存在, 请打开一个有效的Jou文件!'
             self._show_tips(msg, tip_type=1)
             return
 
@@ -207,6 +249,38 @@ class FluentSim(QMainWindow, UiMainWindow):
         else:
             msg = u'文件更新失败, 请确保%s是有效的UDF文件' % fname
             self._show_tips(msg, tip_type=1)
+
+    @pyqtSlot()
+    def on_btn_save_jou_simtime_clicked(self):
+        """
+        Save the jou file of phase2.
+        """
+        msg = u'保存仿真时间，确定吗?'
+        reply = self.show_yesno_msgbox(msg)
+        if reply == 0:
+            return
+        # check the validation of jou file
+        fname = self.le_fluent_jou_file2.text()
+        if fname == '':
+            msg = u'逐时分析Jou文件名为空, 请先设置一个有效的Jou文件'
+            self._show_tips(msg, tip_type=1)
+            return
+        # check if file path exists
+        if not os.path.exists(fname):  
+            msg = u'逐时分析Jou文件路径不存在, 请打开一个有效的Jou文件!'
+            self._show_tips(msg, tip_type=1)
+            return
+
+        # get params from widgets
+        params = self.get_fluent_simtime_from_widgets()
+        # update jou file
+        result = self.jou_model.update_sim_time(params, fname)
+        if result == True:
+            msg = u'文件%s更新成功' % fname
+            self._show_tips(msg)
+        else:
+            msg = u'文件更新失败, 请确保%s是有效的Jou文件' % fname
+            self._show_tips(msg, tip_type=1)
     
     @pyqtSlot()
     def on_btn_open_fluent_cas_clicked(self):
@@ -225,19 +299,35 @@ class FluentSim(QMainWindow, UiMainWindow):
             self._show_tips(msg)
     
     @pyqtSlot()
-    def on_btn_open_fluent_jou_clicked(self):
+    def on_btn_open_fluent_jou1_clicked(self):
         """
         Slot documentation goes here.
         """
-        if self.le_fluent_jou_file.text() != '':
-            msg = u'Jou文件已打开，确定打开另一个替换吗?'
+        if self.le_fluent_jou_file1.text() != '':
+            msg = u'稳态计算Jou文件已打开，确定打开另一个替换吗?'
             reply = self.show_yesno_msgbox(msg)
             if reply == 0:
                 return
         fname = self.show_file_dialog('Fluent journal file (*.jou)')
         if fname != '':
-            self.le_fluent_jou_file.setText(fname)
-            msg = u'新的Jou文件已打开, 若想保存至当前工程，请点击保存工程按钮'
+            self.le_fluent_jou_file1.setText(fname)
+            msg = u'新的稳态计算Jou文件已打开, 若想保存至当前工程，请点击保存工程按钮'
+            self._show_tips(msg)
+    
+    @pyqtSlot()
+    def on_btn_open_fluent_jou2_clicked(self):
+        """
+        Slot documentation goes here.
+        """
+        if self.le_fluent_jou_file2.text() != '':
+            msg = u'逐时分析Jou文件已打开，确定打开另一个替换吗?'
+            reply = self.show_yesno_msgbox(msg)
+            if reply == 0:
+                return
+        fname = self.show_file_dialog('Fluent journal file (*.jou)')
+        if fname != '':
+            self.le_fluent_jou_file2.setText(fname)
+            msg = u'新的逐时分析Jou文件已打开, 若想保存至当前工程，请点击保存工程按钮'
             self._show_tips(msg)
     
     @pyqtSlot()
@@ -266,8 +356,6 @@ class FluentSim(QMainWindow, UiMainWindow):
             reply = self.show_yesno_msgbox(msg)
             if reply == 0:
                 return
-        msg = u'请保证建筑负荷文件与UDF文件在同一目录下'
-        self._show_tips(msg)
         fname = self.show_file_dialog('Fluent load file (*)')
         if fname != '':
             self.le_fluent_load_file.setText(fname)
@@ -303,7 +391,8 @@ class FluentSim(QMainWindow, UiMainWindow):
             # set window title and line edit widgets
             self.setWindowTitle(u'工程 - %s' % self.proj_name)
             self.le_proj_file.setText(fname)
-            self.le_fluent_jou_file.setText(self.fluent_jou_file)
+            self.le_fluent_jou_file1.setText(self.fluent_jou_file1)
+            self.le_fluent_jou_file2.setText(self.fluent_jou_file2)
             self.le_fluent_cas_file.setText(self.fluent_cas_file)
             self.le_fluent_udf_file.setText(self.fluent_udf_file)
             self.le_fluent_load_file.setText(self.fluent_load_file)
@@ -361,8 +450,9 @@ class FluentSim(QMainWindow, UiMainWindow):
         msg = QtCore.QT_TR_NOOP("<p><b><font size=5 color='green'>FluentSim"
                         "</font></b><br>"
                         "<p style='font-size:100%;color:black'>"
-                       u"中国建筑设计咨询公司</p>"
-                       u"版权所有(c)2015</p>"
+                       u"中国建筑设计咨询公司<br>"
+                       u"China Building Design Consultants Company</p>"
+                       u"版权所有&copy;2015</p>"
                        )
         QtGui.QMessageBox.about(self, self.tr("About"), msg)
 
@@ -391,6 +481,33 @@ class FluentSim(QMainWindow, UiMainWindow):
         else:
             QtGui.QMessageBox.warning(self, 'Warning', msg, 
                             QtGui.QMessageBox.Ok)
+
+    def _check_fluent_exe_path(self):
+        """Check the validation of fluent exe path"""
+        fluent_path = str(self.le_fluent_path.text())
+        exe_file = fluent_path.split(r'/')[-1]
+        if exe_file != 'fluent.exe' or (not os.path.exists(fluent_path)):
+            msg = u'Fluent路径无效，程序启动失败'
+            self._show_tips(msg)
+            return None
+        return fluent_path
+
+    def _get_case_fname(self):
+        text = str(self.le_fluent_cas_file.text())
+        if text == '':
+            msg = u'Case文件不能为空'
+            self._show_tips(msg, tip_type=1)
+            return
+        case_fpath = text.split(r'/')
+        case_fpath[-1] = re.sub(r'(\w+)\.', r'\g<1>-steady.', case_fpath[-1])
+        steady_case_fname = '/'.join(case_fpath)
+        case_fpath[-1] = re.sub(r'steady\.', r'unsteady.', case_fpath[-1])
+        unsteady_case_fname = '/'.join(case_fpath)
+        fnames = {'native' : text,
+                  'steady' : steady_case_fname, 
+                  'unsteady': unsteady_case_fname
+                 }
+        return fnames
 
     def show_yesno_msgbox(self, msg):
         """
@@ -424,7 +541,8 @@ class FluentSim(QMainWindow, UiMainWindow):
             return False
         config_dict = dict((key,val) for key,val in res)
         self.proj_name        = self._get_dict_val(config_dict, 'ProjectName')
-        self.fluent_jou_file  = self._get_dict_val(config_dict, 'FluentJournal')
+        self.fluent_jou_file1 = self._get_dict_val(config_dict, 'FluentJournal1')
+        self.fluent_jou_file2 = self._get_dict_val(config_dict, 'FluentJournal2')
         self.fluent_cas_file  = self._get_dict_val(config_dict, 'FluentCase')
         self.fluent_udf_file  = self._get_dict_val(config_dict, 'FluentUdf')
         self.fluent_load_file = self._get_dict_val(config_dict, 'FluentLoadData')
@@ -437,7 +555,8 @@ class FluentSim(QMainWindow, UiMainWindow):
         """
         lines = []
         lines.append("[ProjectName]=%s\n" % self.proj_name)
-        lines.append("[FluentJournal]=%s\n" % self.le_fluent_jou_file.text())
+        lines.append("[FluentJournal1]=%s\n" % self.le_fluent_jou_file1.text())
+        lines.append("[FluentJournal2]=%s\n" % self.le_fluent_jou_file2.text())
         lines.append("[FluentCase]=%s\n" % self.le_fluent_cas_file.text())
         lines.append("[FluentUdf]=%s\n" % self.le_fluent_udf_file.text())
         lines.append("[FluentLoadData]=%s\n" % self.le_fluent_load_file.text())
@@ -450,6 +569,7 @@ class FluentSim(QMainWindow, UiMainWindow):
         """
         Set all line edit widgets of fluent parameters.
         """
+        self.le_pipe_depth.setText(params['pipe_depth'])
         self.le_backfill_heat_coeff.setText(params['backfill_heat_coeff'])
         self.le_backfill_density.setText(params['backfill_density'])
         self.le_backfill_spec_heat.setText(params['backfill_spec_heat'])
@@ -461,16 +581,6 @@ class FluentSim(QMainWindow, UiMainWindow):
         self.le_soil_spec_heat.setText(params['soil_spec_heat'])
         self.le_init_ground_temp.setText(params['ground_temp'])
         self.le_loop_velocity.setText(params['loop_velocity'])
-        self.le_loop_hydr_diameter.setText(params['loop_diameter'])
-        percent = float(params['loop_intensity']) * 100
-        self.le_loop_intensity.setText('%s' % percent)
-
-        # iterate time
-        self.le_fluent_time_step.setText(params['time_step'])
-        self.le_fluent_time_year.setText(params['time_year'])
-        self.le_fluent_time_month.setText(params['time_month'])
-        self.le_fluent_time_day.setText(params['time_day'])
-        self.le_fluent_time_hour.setText(params['time_hour'])
 
     def get_fluent_param_from_widgets(self):
         """
@@ -479,19 +589,17 @@ class FluentSim(QMainWindow, UiMainWindow):
         params = {}
 
         # file
-        text = str(self.le_fluent_cas_file.text())
-        if text == '':
-            msg = u'Case文件不能为空'
-            self._show_tips(msg, tip_type=1)
-            return
-        params['case_file'] = text
-        text = str(self.le_fluent_udf_file.text())
-        if text == '':
-            msg = u'UDF文件不能为空'
-            self._show_tips(msg, tip_type=1)
-            return
-        params['udf_file'] = text
+        fnames = self._get_case_fname()
+        params['input_case_file'] = fnames['native']
+        params['output_case_file'] = fnames['steady']
+
         # simualtion paramters
+        text = str(self.le_pipe_depth.text())
+        if text == '':
+            msg = u'埋管深度不能为空'
+            self._show_tips(msg, tip_type=1)
+            return
+        params['pipe_depth'] = text
         text = str(self.le_backfill_heat_coeff.text())
         if text == '':
             msg = u'回填材料导热系数不能为空'
@@ -558,19 +666,25 @@ class FluentSim(QMainWindow, UiMainWindow):
             self._show_tips(msg, tip_type=1)
             return
         params['loop_velocity'] = text
-        text = str(self.le_loop_hydr_diameter.text())
+        return params
+
+    def get_fluent_simtime_from_widgets(self):
+        """
+        Get fluent sim time from line edits.
+        """
+        params = {}
+
+        # file
+        fnames = self._get_case_fname()
+        params['input_case_file'] = fnames['steady']
+        params['output_case_file'] = fnames['unsteady']
+
+        text = str(self.le_fluent_udf_file.text())
         if text == '':
-            msg = u'循环体水力直径不能为空'
+            msg = u'UDF文件不能为空'
             self._show_tips(msg, tip_type=1)
             return
-        params['loop_diameter'] = text
-        text = str(self.le_loop_intensity.text())
-        if text == '':
-            msg = u'循环体紊流强度不能为空'
-            self._show_tips(msg, tip_type=1)
-            return
-        conv_float = float(text) / 100.0
-        params['loop_intensity'] = '%s' % conv_float
+        params['udf_file'] = text
         # iterate time
         text = str(self.le_fluent_time_step.text())
         if text == '':
@@ -578,17 +692,11 @@ class FluentSim(QMainWindow, UiMainWindow):
             self._show_tips(msg, tip_type=1)
             return
         params['time_step'] = text
-        text_year = str(self.le_fluent_time_year.text())
-        text_month = str(self.le_fluent_time_month.text())
-        text_day = str(self.le_fluent_time_day.text())
         text_hour = str(self.le_fluent_time_hour.text())
-        if text_year == '' and text_month == '' and text_day == '' and text_hour == '':
-            msg = u'时间不能全为空'
+        if text_hour == '':
+            msg = u'运行时间不能全为空'
             self._show_tips(msg, tip_type=1)
             return
-        params['time_year'] = text_year
-        params['time_month'] = text_month
-        params['time_day'] = text_day
         params['time_hour'] = text_hour
         return params
 

@@ -63,11 +63,11 @@ GUI2Exe_Target_1 = Target(
 			bitmap_resources = bitmap_resources,
 			other_resources = other_resources,
 			dest_base = "FluentSim",
-			version = "0.3.1",
+			version = "1.0.0",
 			description = "Fluent simulator",
 			company_name = "China Building Design Consultants Company",
-			copyright = "All Rights Reserved",
-			name = "FluentSim",
+			copyright = "China Building Design Consultants Company, All Rights Reserved",
+			name = "FluentSim, v1.0.0",
 		)
 
 # That's serious now: we have all (or almost all) the options py2exe

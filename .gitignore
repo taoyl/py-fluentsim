@@ -43,6 +43,7 @@ Temporary Items
 .apdisk
 
 # pothon compile file and bak file
+.*.swp
 *.pyc
 *~
 images
