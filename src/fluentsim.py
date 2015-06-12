@@ -84,8 +84,15 @@ class FluentSim(QMainWindow, UiMainWindow):
         if jou_file == '' or (not os.path.exists(jou_file)):
             msg = u'Journal文件路径无效，程序启动失败'
             self._show_tips(msg)
-        # remove existing unsteady model
+            return
+
         fnames = self._get_case_fname()
+        # check input case & data file
+        if not os.path.exists(fnames['steady']):
+            msg = u'稳态计算中间文件不存在，请先执行稳态流动计算'
+            self._show_tips(msg)
+            return
+        # remove existing unsteady model
         if os.path.exists(fnames['unsteady']):
             os.remove(fnames['unsteady'])
         fpath = fnames['unsteady'].split(r'/')
@@ -112,12 +119,12 @@ class FluentSim(QMainWindow, UiMainWindow):
         fname = self.le_fluent_jou_file1.text()
         # check if file name is empty
         if fname == '':
-            msg = u'Jou文件名为空, 请先打开一个Jou文件!'
+            msg = u'稳态计算Jou文件名为空, 请先打开一个Jou文件!'
             self._show_tips(msg, tip_type=1)
             return
         # check if file path exists
         if not os.path.exists(fname):  
-            msg = u'Jou文件路径不存在, 请打开一个有效Jou文件路径!'
+            msg = u'稳态计算Jou文件路径不存在, 请打开一个有效Jou文件路径!'
             self._show_tips(msg, tip_type=1)
             return
         params = self.jou_model.read_params(fname)
