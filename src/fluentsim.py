@@ -11,7 +11,7 @@ Date  : Apr 21, 2015
 
 import re
 import os
-import subprocess
+import shutil
 
 from PyQt4 import QtCore, QtGui
 from PyQt4.QtCore import pyqtSlot, QThread
@@ -53,9 +53,9 @@ class FluentSim(QMainWindow, UiMainWindow):
         fluent_path = self._check_fluent_exe_path()
         if fluent_path == None:
             return
-        # check journal file
-        jou_file = str(self.le_fluent_jou_file1.text())
-        if jou_file == '' or (not os.path.exists(jou_file)):
+        # check journal1 file
+        jou1_file = str(self.le_fluent_jou_file1.text())
+        if jou1_file == '' or (not os.path.exists(jou1_file)):
             msg = u'稳态计算Journal文件路径无效，程序启动失败'
             self._show_tips(msg)
         # remove existing steady model
@@ -67,8 +67,28 @@ class FluentSim(QMainWindow, UiMainWindow):
         data_fname = '/'.join(fpath)
         if os.path.exists(data_fname):
             os.remove(data_fname)
+        # shall update the phase2 journal file hereh because users may
+        # run phase2 simulation directly after the phase1 without clicking 
+        # the save simtime button.
+        update_success = False
+        jou2_fname = self.le_fluent_jou_file2.text()
+        if jou2_fname != '' and os.path.exists(jou2_fname):  
+            # get params from widgets
+            udf_file = str(self.le_fluent_udf_file.text())
+            if udf_file != '' and os.path.exists(udf_file):
+                params = { 'input_case_file': fnames['steady'],
+                           'output_case_file' : fnames['unsteady'],
+                           'udf_file' : udf_file,
+                           'time_step' : '3600',
+                           'time_hour' : '8760', }
+                # update jou file
+                update_success = self.jou_model.update_sim_time(params, 
+                                 jou2_fname)
+        if update_success == False:
+            msg = u'逐时分析命令流文件更新失败, 请在执行逐时分析前先保存仿真时间'
+            self._show_tips(msg, tip_type=1)
         # run fluent
-        cmd = '%s 3ddp -i %s' % (fluent_path, jou_file)
+        cmd = '%s 3ddp -i %s' % (fluent_path, jou1_file)
         os.system(cmd) # non-blocking
     
     @pyqtSlot()
@@ -363,9 +383,30 @@ class FluentSim(QMainWindow, UiMainWindow):
             reply = self.show_yesno_msgbox(msg)
             if reply == 0:
                 return
-        fname = self.show_file_dialog('Fluent load file (*)')
-        if fname != '':
-            self.le_fluent_load_file.setText(fname)
+        udf_fname = str(self.le_fluent_udf_file.text())
+        if udf_fname == '' or (not os.path.exists(udf_fname)):
+            msg = u'请先设置UDF文件路径'
+            self._show_tips(msg)
+            return
+        load_fname = self.show_file_dialog('Fluent load file (*)')
+        if load_fname != '':
+            # check if the load file is in the same directory as udf file
+            udf_path = os.path.dirname(udf_fname) 
+            load_path = os.path.dirname(load_fname)
+            if udf_path != load_path:
+                msg = (u'检测到建筑负载文件与UDF文件不在同一路径下, '
+                       u'是否将其复制到UDF目录?\n'
+                       u'若选择Yes, 则复制文件.\n'
+                       u'若选择取消, 请重新选择位于UDF文件夹的建筑负载文件.')
+                reply = self.show_yesno_msgbox(msg)
+                if reply == 0:
+                    return
+                else:
+                    new_load_fname = os.path.dirname(udf_fname) + '/' 
+                    new_load_fname += os.path.basename(load_fname)
+                    shutil.copy(load_fname, new_load_fname)
+                    load_fname = new_load_fname
+            self.le_fluent_load_file.setText(load_fname)
             msg = u'新的建筑负荷文件已打开, 若想保存至当前工程，请点击保存工程按钮'
             self._show_tips(msg)
 
@@ -455,7 +496,7 @@ class FluentSim(QMainWindow, UiMainWindow):
         Slot documentation goes here.
         """
         msg = QtCore.QT_TR_NOOP("<p><b><font size=5 color='green'>FluentSim"
-                        "</font></b><br>"
+                        " v1.1.0</font></b><br>"
                         "<p style='font-size:100%;color:black'>"
                        u"中国建筑设计咨询公司<br>"
                        u"China Building Design Consultants Company</p>"
@@ -534,7 +575,7 @@ class FluentSim(QMainWindow, UiMainWindow):
         """
         fname = QtGui.QFileDialog.getOpenFileName(self, 'Open file', 
                         './', file_filter)
-        return fname
+        return str(fname)
 
     def read_proj_file(self, fname):
         """

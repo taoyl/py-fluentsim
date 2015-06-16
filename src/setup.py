@@ -9,7 +9,7 @@ import os
 import zlib
 import shutil
 
-distname = "release"
+distname = "../bin"
 
 # If run without args, build executables, in quiet mode.
 if len(sys.argv) == 1:
@@ -31,12 +31,12 @@ class Target(object):
 data_files = []
 includes   = ['sip']
 excludes   = ['_gtkagg', '_tkagg', 'bsddb', 'curses', 'email', 
-			  'pywin.debugger', 'pywin.debugger.dbgcon', 
-			  'pywin.dialogs', 'tcl', 'Tkconstants', 'Tkinter']
+			     'pywin.debugger', 'pywin.debugger.dbgcon', 
+			     'pywin.dialogs', 'tcl', 'Tkconstants', 'Tkinter']
 
 packages = []
 dll_excludes = ['libgdk-win32-2.0-0.dll', 'libgobject-2.0-0.dll', 
-				'tcl84.dll', 'tk84.dll']
+				    'tcl84.dll', 'tk84.dll']
 icon_resources = [(1, "./images/fluentsim-32.ico")]
 bitmap_resources = []
 other_resources = []
@@ -63,11 +63,11 @@ GUI2Exe_Target_1 = Target(
 			bitmap_resources = bitmap_resources,
 			other_resources = other_resources,
 			dest_base = "FluentSim",
-			version = "1.0.0",
+			version = "1.1.0",
 			description = "Fluent simulator",
 			company_name = "China Building Design Consultants Company",
 			copyright = "China Building Design Consultants Company, All Rights Reserved",
-			name = "FluentSim, v1.0.0",
+			name = "FluentSim, v1.1.0",
 		)
 
 # That's serious now: we have all (or almost all) the options py2exe

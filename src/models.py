@@ -52,7 +52,7 @@ class JouFileModel(object):
         with open(fname, 'w') as wfh:
              wfh.write(lines)
         # TODO
-        #os.remove(backup_fname)
+        os.remove(backup_fname)
         return True
 
     def read_params(self, fname=None):
@@ -339,13 +339,18 @@ class UdfFileModel(object):
             lines = re.sub(r'(%s\s*=\s*)[-.\d]+' % param, 
                     r'\g<1>%s' % params[param], lines)
         # write lines back
-        # TODO
+        return self._write_file(fname, lines)
+
+    def _write_file(self, fname, lines):
+        """Write all lines into a file"""
         backup_fname = '%s.old' % fname
         if os.path.exists(backup_fname):
             os.remove(backup_fname)
         os.rename(fname, backup_fname)
-        with open(fname, 'w') as wrh:
-            wrh.write(lines)
+        with open(fname, 'w') as wfh:
+             wfh.write(lines)
+        # TODO
+        os.remove(backup_fname)
         return True
 
     def calc_max_min_q(self, fname):
